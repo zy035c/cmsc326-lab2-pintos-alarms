@@ -12,7 +12,7 @@
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #ifdef USERPROG
-#include "userprog/process.h"sleep_list
+#include "userprog/process.h"
 #endif
 
 /* Random value for struct thread's `magic' member.
@@ -166,7 +166,7 @@ thread_tick (void)
 	Caculate the time when the thread will wake up,
 	put it into the sleep_list
 	
-	All threads share one sema.
+	All threads hold semaphore.
 */
 void 
 thread_sleep(struct thread* cur, int64_t sleep_until) {
@@ -204,8 +204,7 @@ thread_check_wakeup() {
      	// than the time the thread should wake up,
      	// wake it up
      	sema_up(&(entry->sleep_sema)); // wake up, get sema
-     	entry->sleep_until = 0; // reset sleep_until to
-     	// it means that the thread is not going to sleep
+     	entry->sleep_until = 0; // reset sleep_until
      	list_remove(&(entry->sleep_elem));
      }     
   }
@@ -548,7 +547,7 @@ init_thread (struct thread *t, const char *name, int priority)
   //
   // ADD FOR CMSC326 lab2
   sema_init(&(t->sleep_sema), 0);
-  t->sleep_until = 0;
+  t->sleep_until = 0; // set sleep_until to 0, which means that it doesn't need to sleep
   //
   //
   
