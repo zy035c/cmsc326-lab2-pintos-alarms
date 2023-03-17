@@ -4,6 +4,8 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "threads/synch.h"
+#include <inttypes.h>
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -92,8 +94,16 @@ struct thread
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
-    int64_t sleep_ticks;
-
+    
+    //
+    // ADD FOR CMSC326 Lab2
+    int64_t sleep_until;
+    struct semaphore sleep_sema; // All threads share sleep_sema
+    struct list_elem sleep_elem; // list_elem for sleep_list
+    // so only one thread among all can be running
+    //
+    
+    
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
@@ -102,6 +112,11 @@ struct thread
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
   };
+
+//
+// ADD FOR CMSC326 Lab2
+struct list sleep_list;
+//
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.

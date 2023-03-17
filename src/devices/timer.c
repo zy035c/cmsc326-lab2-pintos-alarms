@@ -7,7 +7,7 @@
 #include "threads/interrupt.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
-#include "lib/kernel/list.c"
+#include "tests/threads/tests.h"
   
 /* See [8254] for hardware details of the 8254 timer chip. */
 
@@ -30,10 +30,6 @@ static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 static void real_time_delay (int64_t num, int32_t denom);
-
-struct list sleep_list;
-
-
 
 
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
@@ -90,35 +86,16 @@ timer_elapsed (int64_t then)
   return timer_ticks () - then;
 }
 
-/* Sleeps for approximately TICKS timer ticks.  Interrupts must
-   be turned on. */
-   
-   /* code for back up
-   !!!!!!!!!!!!!!!!!!!!!
-void
-timer_sleep (int64_t ticks) 
-{
-  int64_t start = timer_ticks ();
-
-  ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) {
-  	thread_yield();
-  }
-    
-}
-*/
-
 /*
 Lab instruction:
 
 You will be needing to keep track of sleeping threads on a list 
 and permitting them to run when the right amount of time has elapsed.
 
-*/
-
-
-/*
 Written by Ziyi and Nasif
+
+Sleeps for approximately TICKS timer ticks.  Interrupts must
+be turned on. 
 */
 void
 timer_sleep (int64_t ticks) 
@@ -126,35 +103,26 @@ timer_sleep (int64_t ticks)
   
   ASSERT (intr_get_level () == INTR_ON);
   
-  enum intr_level old_level = intr_disable();
-  
   int64_t start = timer_ticks ();
   
   // Sleep the current thread and declare its number of ticks
   struct thread *cur = thread_current ();
-  cur->sleep_ticks = ticks;
-  list_push_back(&sleep_list, &cur->elem); // append the cur thread
-  thread_block();
-  intr_set_level (old_level);
   
-  //Check sleeping threads and wake it if tick has passed
-  //struct list_elem e*;
-  //ASSERT (intr_get_level () == INTR_OFF);
-  
-  //for (e = list_begin(&sleep_list); e != list_end(sleep_list); e = list_next(e) ) {
-     //struct thread *entry = list_entry(e, struct thread, sleep_list);
-     //entry->sleep_ticks--;
-     //if (entry->sleep_ticks <=0 ) {
-        //list_remove(&entry);
-     	//thread_unblock(entry);
-     //}
-  //}
-  
-  
-  
-
-  
-    
+  /*
+  	A very extreme case: if we called timer_ticks() and 
+  	get start as the time the thread starts to sleep,
+  	then we do thread switch, and when we switch back
+  	to this thread, timer_ticks() which gives us the 
+  	current time - start, indicating such time has elapsed,
+  	is greater than the time the thread should sleep.
+  	In another word, we haven't put the thread to sleep,
+  	but the sleep time has already elapsed. In that case,
+  	we do not put it to sleep.
+  	Otherwise, we call thread_sleep() on the current thread. 
+  */
+  if (timer_ticks() - start < ticks) {
+      thread_sleep(cur, timer_ticks() + ticks);
+  }  
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -232,7 +200,7 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
-  thread_tick ();
+  thread_tick();
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer

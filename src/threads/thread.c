@@ -12,7 +12,7 @@
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #ifdef USERPROG
-#include "userprog/process.h"
+#include "userprog/process.h"sleep_list
 #endif
 
 /* Random value for struct thread's `magic' member.
@@ -27,12 +27,6 @@ static struct list ready_list;
 /* List of all processes.  Processes are added to this list
    when they are first scheduled and removed when they exit. */
 static struct list all_list;
-
-
-
-// written by n and z
-struct list sleep_list;
-
 
 
 /* Idle thread. */
@@ -99,7 +93,12 @@ thread_init (void)
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&all_list);
+
+  //
+  // ADD FOR CMSC326 lab 2
   list_init (&sleep_list);
+  //
+  //
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
@@ -141,28 +140,81 @@ thread_tick (void)
 #endif
   else
     kernel_ticks++;
-  thread_wakeup();
+    
+    
+ /* 
+	----------NOTE from Ziyi and Nasif----------
+	thread_tick() is called at each timer tick. 
+	Therefore, we call thread_check_wakeup()
+	We do round-robin like checking of all
+	sleeping threads.
+ */
+  thread_check_wakeup(); 
+  
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
     intr_yield_on_return ();
 }
 
-/*Wake up sleeping threads */
+
+/* 
+	----------NOTE from Ziyi and Nasif----------
+	Put thread to sleep. 
+	We used to try to do using thread_block().
+	However, thread_block() is not synchronized well.
+	We should use sema_down() instead.
+	Caculate the time when the thread will wake up,
+	put it into the sleep_list
+	
+	All threads share one sema.
+*/
+void 
+thread_sleep(struct thread* cur, int64_t sleep_until) {
+
+  cur->sleep_until = sleep_until;
+  list_push_back(&sleep_list, &(cur->sleep_elem)); // put it into sleep_list
+  sema_down(&(cur->sleep_sema)); // call sema_down, which causes the thread to block
+  // and give it to other threads
+}
+
+
+/* 
+	----------NOTE from Ziyi and Nasif----------
+	This function iterates over the sleep_list.
+	For each thread, we have a varible called
+	sleep_until, which indicates that the thread
+	should not wake up until sleep_until.
+*/
 void
-thread_wakeup(){
+thread_check_wakeup() {
   //Check sleeping threads and wake it if tick has passed
   struct list_elem* e;
-  ASSERT (intr_get_level () == INTR_OFF);
   
-  for (e = list_begin(&sleep_list); e != list_end(&sleep_list); e = list_next(e) ) {
-     struct thread *entry = list_entry(e, struct thread, elem);
-     entry->sleep_ticks--;
-     if (entry->sleep_ticks <=0 ) {
-        list_remove(entry);
-     	thread_unblock(entry);
-     }
+  // ASSERT (intr_get_level () == INTR_OFF);
+  
+  for (e = list_begin(&sleep_list); 
+  e != list_end(&sleep_list); 
+  e = list_next(e) ) { // iterate over the list
+     struct thread *entry = list_entry(e, struct thread, sleep_elem);
+     int64_t cur_time = timer_ticks(); // get the current time
+     if (entry->sleep_until <= cur_time && 
+     entry->status == THREAD_BLOCKED && 
+     entry->sleep_until != 0) { 
+        // if current time is greater 
+     	// than the time the thread should wake up,
+     	// wake it up
+     	sema_up(&(entry->sleep_sema)); // wake up, get sema
+     	entry->sleep_until = 0; // reset sleep_until to
+     	// it means that the thread is not going to sleep
+     	list_remove(&(entry->sleep_elem));
+     }     
   }
 }
+
+
+
+
+
 
 /* Prints thread statistics. */
 void
@@ -352,7 +404,7 @@ thread_foreach (thread_action_func *func, void *aux)
        e = list_next (e))
     {
       struct thread *t = list_entry (e, struct thread, allelem);
-      func (t, aux);
+      func (t, aux); 
     }
 }
 
@@ -407,7 +459,7 @@ thread_get_recent_cpu (void)
    thread_start().  It will be scheduled once initially, at which
    point it initializes idle_thread, "up"s the semaphore passed
    to it to enable thread_start() to continue, and immediately
-   blocks.  After that, the idle thread never appears in the
+   blocks.  After that, the idle thread never appears in thesema_down
    ready list.  It is returned by next_thread_to_run() as a
    special case when the ready list is empty. */
 static void
@@ -492,6 +544,14 @@ init_thread (struct thread *t, const char *name, int priority)
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
   intr_set_level (old_level);
+  
+  //
+  // ADD FOR CMSC326 lab2
+  sema_init(&(t->sleep_sema), 0);
+  t->sleep_until = 0;
+  //
+  //
+  
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
