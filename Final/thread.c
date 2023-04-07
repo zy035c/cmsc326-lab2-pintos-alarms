@@ -11,9 +11,8 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
-#include <stdlib.h>
 #ifdef USERPROG
-#include "userprog/process.h"sleep_list
+#include "userprog/process.h"
 #endif
 
 /* Random value for struct thread's `magic' member.
@@ -55,17 +54,6 @@ static long long user_ticks;    /* # of timer ticks in user programs. */
 /* Scheduling. */
 #define TIME_SLICE 1            /* # of timer ticks to give each thread. */
 static unsigned thread_ticks;   /* # of timer ticks since last yield. */
-/* 
-  ---------------Lab 3---------------
-  After some time period S, 
-  move all the jobs in the system to the topmost queue.  
-  This includes any blocked jobs.
-*/
-static long long mlfqs_total_ticks;
-void mlfqs_move_all_to_top(void);
-void mlfqs_move_down(struct thread* t);
-void thread_check_wakeup(void);
-
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
@@ -79,6 +67,17 @@ bool thread_mlfqs;
 // 0 - 19
 // 20 - 1 + 1
 static struct list mlfqs_list[PRI_MAX - PRI_MIN + 1];
+/* 
+  ---------------Lab 3---------------
+  After some time period S, 
+  move all the jobs in the system to the topmost queue.  
+  This includes any blocked jobs.
+*/
+static long long mlfqs_total_ticks;
+void mlfqs_move_all_to_top(void);
+void mlfqs_move_down(struct thread* t);
+void thread_check_wakeup(void);
+
 
 static void kernel_thread (thread_func *, void *aux);
 
@@ -158,8 +157,6 @@ thread_start (void)
   /* Create the idle thread. */
   struct semaphore idle_started;
   sema_init (&idle_started, 0);
-
-
   thread_create ("idle", PRI_MIN, idle, &idle_started);
 
   /* Start preemptive thread scheduling. */
@@ -186,6 +183,7 @@ thread_tick (void)
   else
     kernel_ticks++;
     
+    
  /* 
 	----------NOTE from Ziyi and Nasif----------
 	thread_tick() is called at each timer tick. 
@@ -194,27 +192,34 @@ thread_tick (void)
 	sleeping threads.
  */
   thread_check_wakeup(); 
-  
-  /* Enforce preemption. */
 
   /*
   ------------------CHANGED FOR LAB 3------------------
   */
   if (thread_mlfqs) {
-    // should i turn off interrupt?
-    if (++(t->mlfqs_tick) >= TIME_SLICE) {
-      mlfqs_move_down(t);
-      // thread_block(); // block the current thread?
+    // should I turn off interrupt?
+
+    /*
+      p 19 runs 1 slice
+      p 18 runs 2 slices
+      p 17 runs 3 slices
+      ...
+      p 0  runs 20 slices
+    */
+    if (++(t->mlfqs_tick) >= PRI_MAX - t->priority + TIME_SLICE) {
+      mlfqs_move_down (t);
     }
     /*
       After some time period S, move all the jobs in the system 
       to the topmost queue.  This includes any blocked jobs.
     */
-    if (++mlfqs_total_ticks % TOPMOST_S == 0) {
+    if (++mlfqs_total_ticks >= TOPMOST_S) {
       mlfqs_move_all_to_top();
+      mlfqs_total_ticks = 0;
     }
   }
- 
+  
+  /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
     intr_yield_on_return ();
 }
@@ -227,19 +232,37 @@ thread_tick (void)
   down one queue until it reaches PRI_MIN.
 */
 void 
-mlfqs_move_down(struct thread* t) {
+mlfqs_move_down (struct thread* t) {
+  // struct list_elem *e;
+  // for (int i = PRI_MAX-PRI_MIN; i > 0; --i) {
 
-  int cur_priority = thread_get_priority();
+  //   struct mlfqs_elem *e;
+  //   struct list* queue = &mlfqs_list[i];
+  //   for (e = list_begin (queue); e != list_end (queue); e = list_next (e)) {
+  //     struct thread *t = list_entry (e, struct thread, mlfqs_elem);
+  //     if (++(t->mlfqs_tick) >= TIME_SLICE) {
+  //       int cur_priority = t->priority;
+  //       list_remove (&t->mlfqs_elem);
+  //       if (--cur_priority < PRI_MIN) {
+  //         cur_priority = PRI_MIN;
+  //       }
+  //     }
+  //   }
+  // }
+  // thread_block();
+  // t->status = THREAD_BLOCKED;
+  // schedule ();
   
-  // list_remove(&(t->mlfqs_elem));
+  int cur_priority = t->priority;
+  
+  // list_remove (&t->mlfqs_elem);
 
   if (--cur_priority < PRI_MIN) {
     cur_priority = PRI_MIN;
   }
-  thread_set_priority(cur_priority);
+  t->priority = cur_priority; 
 
-  struct list* new_queue = &(mlfqs_list[cur_priority]);
-  list_push_back(new_queue, &(t->mlfqs_elem));
+  // list_push_back (&mlfqs_list[cur_priority], &t->mlfqs_elem);
   // push it from old queue
   // add it to the lower queue
   // reset mlfqs_tick
@@ -252,7 +275,7 @@ mlfqs_move_down(struct thread* t) {
   to the topmost queue.  This includes any blocked jobs.
 */
 void 
-mlfqs_move_all_to_top() {
+mlfqs_move_all_to_top () {
   /*
     assume PRI_MAX = 108, PRI_MIN = 102
     we have 108-102+1 = 7 priority queues in total
@@ -262,11 +285,10 @@ mlfqs_move_all_to_top() {
   struct list* topmost = &(mlfqs_list[PRI_MAX-PRI_MIN]);
 
   for (int i = PRI_MAX - PRI_MIN - 1; i >= 0; --i) {
-    struct list* cur_queue = &(mlfqs_list[i]);
-    while (!list_empty (cur_queue)) {
-      struct thread* tmp = list_entry (list_pop_front(cur_queue), struct thread, mlfqs_elem);
-      list_push_back (topmost, &(tmp->mlfqs_elem));
-    }     
+    while (!list_empty (&mlfqs_list[i])) {
+      struct thread* tmp = list_entry (list_pop_front (&mlfqs_list[i]), struct thread, mlfqs_elem);
+      list_push_back (&mlfqs_list[PRI_MAX - PRI_MIN], &tmp->mlfqs_elem);
+    }
   }
 }
 
@@ -280,7 +302,7 @@ mlfqs_move_all_to_top() {
 	Caculate the time when the thread will wake up,
 	put it into the sleep_list
 	
-	All threads share one sema.
+	All threads hold semaphore.
 */
 void 
 thread_sleep(struct thread* cur, int64_t sleep_until) {
@@ -300,7 +322,7 @@ thread_sleep(struct thread* cur, int64_t sleep_until) {
 	should not wake up until sleep_until.
 */
 void
-thread_check_wakeup() {
+thread_check_wakeup () {
   //Check sleeping threads and wake it if tick has passed
   struct list_elem* e;
   
@@ -318,10 +340,9 @@ thread_check_wakeup() {
      	// than the time the thread should wake up,
      	// wake it up
      	sema_up(&(entry->sleep_sema)); // wake up, get sema
-     	entry->sleep_until = 0; // reset sleep_until to
-     	// it means that the thread is not going to sleep
+     	entry->sleep_until = 0; // reset sleep_until
      	list_remove(&(entry->sleep_elem));
-    }     
+     }     
   }
 }
 
@@ -407,12 +428,7 @@ thread_block (void)
   ASSERT (!intr_context ());
   ASSERT (intr_get_level () == INTR_OFF);
 
-  struct thread* cur = thread_current ();
-  cur->status = THREAD_BLOCKED;
-  // if (thread_mlfqs) {
-  //   list_remove(&cur->mlfqs_elem);
-  // }
-  
+  thread_current ()->status = THREAD_BLOCKED;
   schedule ();
 }
 
@@ -434,14 +450,6 @@ thread_unblock (struct thread *t)
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
 
-  /* 
-    ----------NOTE from Ziyi and Nasif----------
-    when add thread to run queue, if
-    thread_start()
-      -> thread_create() 
-        -> thread_unblock(), init_thread()
-          -> list_push_back() a thread to the ready_list 
-  */
   if (thread_mlfqs) {
     // printf ("list push back to mlfqs list happened\n");
     // 718, 439, 
@@ -449,7 +457,7 @@ thread_unblock (struct thread *t)
   } else {
     list_push_back (&ready_list, &t->elem);
   }
-  
+
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -519,7 +527,15 @@ thread_yield (void)
   ASSERT (!intr_context ());
 
   old_level = intr_disable ();
-  
+
+  if (cur != idle_thread) {
+    if (thread_mlfqs) {
+      list_push_back (&(mlfqs_list[cur->priority]), &cur->mlfqs_elem);
+    } else {
+      list_push_back (&ready_list, &cur->elem);
+    }
+  }
+
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -586,7 +602,7 @@ thread_get_recent_cpu (void)
   /* Not yet implemented. */
   return 0;
 }
-
+
 /* Idle thread.  Executes when no other thread is ready to run.
 
    The idle thread is initially put on the ready list by
@@ -635,7 +651,7 @@ kernel_thread (thread_func *function, void *aux)
   function (aux);       /* Execute the thread function. */
   thread_exit ();       /* If function() returns, kill the thread. */
 }
-
+
 /* Returns the running thread. */
 struct thread *
 running_thread (void) 
@@ -682,8 +698,8 @@ init_thread (struct thread *t, const char *name, int priority)
   //
   // ADD FOR CMSC326 lab2
   sema_init(&(t->sleep_sema), 0);
-  t->sleep_until = 0;
-  // ADD FOR CMSC326 lab3
+  t->sleep_until = 0; // set sleep_until to 0, which means that it doesn't need to sleep
+  //
   t->mlfqs_tick = 0;
   //
   
@@ -709,29 +725,23 @@ alloc_frame (struct thread *t, size_t size)
    idle_thread. */
 static struct thread *
 next_thread_to_run (void) 
-{ 
-  
+{
   if (thread_mlfqs) {
     for (int i = 19; i >= 0; --i) {
-      struct list* cur_queue = &(mlfqs_list[i]);
-      if (!list_empty (cur_queue)) {
+      if (!list_empty (&mlfqs_list[i])) {
         //printf("list_pop_front from mlfqs list happened\n");
-        return list_entry (list_pop_front (cur_queue), struct thread, mlfqs_elem); // pop front from queue
+        return list_entry (list_pop_front (&mlfqs_list[i]), struct thread, mlfqs_elem); // pop front from queue
       }
-      int a = i + 23; // extend lifetime of i for debug
+      // extend lifetime of i for debug
     }
-    
     return idle_thread;
 
   } else {
-
-    if (list_empty (&ready_list)) {
+    if (list_empty (&ready_list))
       return idle_thread;
-    } else {
+    else
       return list_entry (list_pop_front (&ready_list), struct thread, elem);
-    }
   }
-  
 }
 
 /* Completes a thread switch by activating the new thread's page
