@@ -11,6 +11,7 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include <stdlib.h>
 #ifdef USERPROG
 #include "userprog/process.h"sleep_list
 #endif
@@ -52,7 +53,7 @@ static long long kernel_ticks;  /* # of timer ticks in kernel threads. */
 static long long user_ticks;    /* # of timer ticks in user programs. */
 
 /* Scheduling. */
-#define TIME_SLICE 4            /* # of timer ticks to give each thread. */
+#define TIME_SLICE 1            /* # of timer ticks to give each thread. */
 static unsigned thread_ticks;   /* # of timer ticks since last yield. */
 /* 
   ---------------Lab 3---------------
@@ -61,6 +62,10 @@ static unsigned thread_ticks;   /* # of timer ticks since last yield. */
   This includes any blocked jobs.
 */
 static long long mlfqs_total_ticks;
+void mlfqs_move_all_to_top(void);
+void mlfqs_move_down(struct thread* t);
+void thread_check_wakeup(void);
+
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
@@ -73,7 +78,7 @@ bool thread_mlfqs;
 // 20 queues in total
 // 0 - 19
 // 20 - 1 + 1
-struct list mlfqs_list[PRI_MAX - PRI_MIN + 1];
+static struct list mlfqs_list[PRI_MAX - PRI_MIN + 1];
 
 static void kernel_thread (thread_func *, void *aux);
 
@@ -117,11 +122,13 @@ thread_init (void)
   */
   if (thread_mlfqs) {
     for (int i = 0; i < 20; ++i) {
-      struct list tmp_q;
-      list_init (&tmp_q); // use list instead
-      mlfqs_list[i] = tmp_q; // store this feedback queue at i
+      // malloc pointers
+
+      list_init (&mlfqs_list[i]); // use list instead pf intq
+      // store this feedback queue pointer at i
     }
   }
+  
   mlfqs_total_ticks = 0;
 
   ASSERT (intr_get_level () == INTR_OFF);
@@ -231,8 +238,8 @@ mlfqs_move_down(struct thread* t) {
   }
   thread_set_priority(cur_priority);
 
-  struct list new_queue = mlfqs_list[cur_priority];
-  list_push_back(&new_queue, &(t->mlfqs_elem));
+  struct list* new_queue = &(mlfqs_list[cur_priority]);
+  list_push_back(new_queue, &(t->mlfqs_elem));
   // push it from old queue
   // add it to the lower queue
   // reset mlfqs_tick
@@ -402,9 +409,9 @@ thread_block (void)
 
   struct thread* cur = thread_current ();
   cur->status = THREAD_BLOCKED;
-  if (thread_mlfqs) {
-    list_remove(&cur->elem);
-  }
+  // if (thread_mlfqs) {
+  //   list_remove(&cur->mlfqs_elem);
+  // }
   
   schedule ();
 }
@@ -436,7 +443,9 @@ thread_unblock (struct thread *t)
           -> list_push_back() a thread to the ready_list 
   */
   if (thread_mlfqs) {
-    list_push_back (&(mlfqs_list[t->priority - PRI_MIN]), &(t->mlfqs_elem));
+    // printf ("list push back to mlfqs list happened\n");
+    // 718, 439, 
+    list_push_back (&(mlfqs_list[t->priority]), &t->mlfqs_elem);
   } else {
     list_push_back (&ready_list, &t->elem);
   }
@@ -510,14 +519,6 @@ thread_yield (void)
   ASSERT (!intr_context ());
 
   old_level = intr_disable ();
-
-  if (thread_mlfqs) {
-    
-    list_push_back (&(mlfqs_list[cur->priority - PRI_MIN]), &(cur->mlfqs_elem));
-  } else {
-    if (cur != idle_thread) list_push_back (&ready_list, &cur->elem);
-  }
-
   
   cur->status = THREAD_READY;
   schedule ();
@@ -709,13 +710,17 @@ alloc_frame (struct thread *t, size_t size)
 static struct thread *
 next_thread_to_run (void) 
 { 
+  
   if (thread_mlfqs) {
     for (int i = 19; i >= 0; --i) {
       struct list* cur_queue = &(mlfqs_list[i]);
       if (!list_empty (cur_queue)) {
-        return list_entry (list_pop_front(cur_queue), struct thread, mlfqs_elem); // pop front from queue
+        //printf("list_pop_front from mlfqs list happened\n");
+        return list_entry (list_pop_front (cur_queue), struct thread, mlfqs_elem); // pop front from queue
       }
+      int a = i + 23; // extend lifetime of i for debug
     }
+    
     return idle_thread;
 
   } else {
@@ -811,7 +816,7 @@ allocate_tid (void)
 
   return tid;
 }
-
+
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
